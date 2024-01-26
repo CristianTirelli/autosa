@@ -8,6 +8,13 @@ import org.chipsalliance.cde.config.{Field, Parameters, Config}
 import freechips.rocketchip.subsystem.BaseSubsystem
 import freechips.rocketchip.diplomacy.LazyModule
 import freechips.rocketchip.tilelink.{TLBuffer, TLIdentityNode, TLWidthWidget, TLFragmenter}
+import org.chipsalliance.cde.config._
+import freechips.rocketchip.diplomacy._
+import freechips.rocketchip.amba.axi4._
+import freechips.rocketchip.amba.apb._
+import freechips.rocketchip.tilelink._
+import freechips.rocketchip.interrupts._
+import freechips.rocketchip.subsystem._
 
 // Parameter Key
 case object AUTOSAKey extends Field[Option[AUTOSAParams]](None)
@@ -28,20 +35,22 @@ trait CanHavePeripheryAUTOSA { this: BaseSubsystem =>
     fbus.coupleFrom("autosa_gmem_A") { _ := autosa.gmem_A_tl_node }
     fbus.coupleFrom("autosa_gmem_B") { _ := autosa.gmem_B_tl_node }
     fbus.coupleFrom("autosa_gmem_C") { _ := autosa.gmem_C_tl_node }
-    pbus.coupleTo("autosa_control") { autosa.control_tl_node := TLFragmenter(4, pbus.blockBytes) := TLWidthWidget(pbus.beatBytes) := _ }
+
+    pbus.coupleTo("autosa_control") { autosa.cfg_tl_node := TLFragmenter(4, pbus.blockBytes) := TLWidthWidget(pbus.beatBytes) := _ }
 
     ibus.fromSync := autosa.int_node
 
   }
 }
 
-
-
 // AUTOSA Main blackbox lazymodule
 class AUTOSA(params: AUTOSAParams)(implicit p: Parameters) extends LazyModule {
 
+  // Parameter setup
+  val dataWidthAXI: Int = 512
+
   // DTS
-  val dtsdevice = new SimpleDevice("nvdla",Seq("nvidia,nv_" + params.config))
+  val dtsdevice = new SimpleDevice("autosa",Seq("ucla,autosa_" + params.kernelName))
 
   // gmem data TL node
   val gmem_A_tl_node = TLIdentityNode()
@@ -49,17 +58,27 @@ class AUTOSA(params: AUTOSAParams)(implicit p: Parameters) extends LazyModule {
   val gmem_C_tl_node = TLIdentityNode()
 
   // gmem data AXI node
-  def get_gmem_axi_node(nodeName: String) = {
+  val gmem_A_axi_node = 
     AXI4MasterNode(
-        Seq(
-          AXI4MasterPortParameters(
-            masters = Seq(AXI4MasterParameters(
-              name    = nodeName,
-              id      = IdRange(0, 256))))))
-  }
-  val gmem_A_axi_node = get_gmem_axi_node("AUTOSA GMEM DATA A")
-  val gmem_B_axi_node = get_gmem_axi_node("AUTOSA GMEM DATA B")
-  val gmem_C_axi_node = get_gmem_axi_node("AUTOSA GMEM DATA C")
+      Seq(
+        AXI4MasterPortParameters(
+          masters = Seq(AXI4MasterParameters(
+            name    = "AUTOSA GMEM DATA A",
+            id      = IdRange(0, 256))))))
+  val gmem_B_axi_node = 
+    AXI4MasterNode(
+      Seq(
+        AXI4MasterPortParameters(
+          masters = Seq(AXI4MasterParameters(
+            name    = "AUTOSA GMEM DATA B",
+            id      = IdRange(0, 256))))))
+  val gmem_C_axi_node =
+    AXI4MasterNode(
+      Seq(
+        AXI4MasterPortParameters(
+          masters = Seq(AXI4MasterParameters(
+            name    = "AUTOSA GMEM DATA C",
+            id      = IdRange(0, 256))))))
 
   def connectTL2AXI(tl_node: TLIdentityNode, axi_node: AXI4MasterNode): Unit = {
     (tl_node
@@ -462,8 +481,26 @@ class autosaio() extends Bundle {
     val m_axi_gmem_C_BUSER = Input(UInt((1).W))
 }
 
+import java.nio.charset.StandardCharsets
+import java.nio.file.{Files, Paths}
+import scala.jdk.CollectionConverters.IteratorHasAsScala
+
+object MergeBlackBoxRTL {
+  def mergeRtlAio(path: String, ext: String): String = {
+
+    // Filter files by extension
+    val filteredFiles = Files.list(Paths.get(path))
+      .iterator()
+      .asScala
+      .filter(p => p.toString.endsWith(s".$ext"))
+
+    // Read and concatenate contents
+    filteredFiles.map(Files.readAllBytes).map(new String(_, StandardCharsets.UTF_8)).mkString("\n")
+  }
+}
+
 // The actual blackbox
-class autosa(params: AUTOSAParams) extends BlackBox with HasBlackBoxPath{
+class autosa(params: AUTOSAParams) extends BlackBox with HasBlackBoxInline{
   // Set the name of BlackBox
   override def desiredName = params.kernelName
   // Define IO
@@ -472,5 +509,5 @@ class autosa(params: AUTOSAParams) extends BlackBox with HasBlackBoxPath{
   val chipyardDir = System.getProperty("user.dir")
   val autosaVsrcDir = s"$chipyardDir/generators/autosa/src/main/resources/vsrc/demo"
   // Include the blackbox
-  addPath(s"$autosaVsrcDir/kernel0.v")
+  setInline(s"AutoSA${params.kernelName}.v", MergeBlackBoxRTL.mergeRtlAio(autosaVsrcDir, "v"))
 }
