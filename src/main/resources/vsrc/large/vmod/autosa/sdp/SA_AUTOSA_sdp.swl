@@ -1,2 +1,0 @@
-waive -regexp -file SA_AUTOSA_SDP_rdma.v -msg "Instance u_reg.*" -rule W210
-waive -regexp -file SA_AUTOSA_sdp.v -msg "Instance u_reg.*" -rule W210
