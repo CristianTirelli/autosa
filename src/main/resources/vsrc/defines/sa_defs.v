@@ -1,0 +1,7 @@
+`define FPGA
+`define SYNTHESIS
+`define DESIGNWARE_NOEXIST
+`define VLIB_BYPASS_POWER_CG
+`define SA_FPGA_SYSTEM
+`define SA_FPGA_FIFOGEN
+`define SA_FPGA_UNIT
